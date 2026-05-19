@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>열화하는 이미지 v.2</title>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;1,300&family=Bebas+Neue&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%; min-height: 100vh;
+  background: #0a0a0a;
+  color: #e8e4dc;
+  font-family: 'DM Mono', monospace;
+  overflow-x: hidden;
+}
+
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none; opacity: 0.5;
+}
+
+#app {
+  position: relative; z-index: 1;
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+  gap: 2rem;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  border-bottom: 1px solid rgba(232,228,220,0.12);
+  padding-bottom: 1.25rem;
+}
+.download-badge { text-align: right; }
+.download-badge .num {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 2.8rem;
+  line-height: 1;
+  color: #e8e4dc;
+  transition: color 0.4s;
+}
+.download-badge .lbl {
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(232,228,220,0.35);
+  margin-top: 4px;
+}
+
+#canvas-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4/3;
+  overflow: hidden;
+}
+canvas {
+  width: 100%; height: 100%;
+  display: block;
+  image-rendering: pixelated;
+}
+.deg-overlay {
+  position: absolute;
+  top: 1rem; left: 1rem;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(232,228,220,0.55);
+  background: rgba(10,10,10,0.6);
+  padding: 4px 10px;
+  border: 1px solid rgba(232,228,220,0.1);
+  pointer-events: none;
+}
+#stage-label {
+  position: absolute;
+  bottom: 1rem; right: 1rem;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(232,228,220,0.4);
+  background: rgba(10,10,10,0.6);
+  padding: 4px 10px;
+  border: 1px solid rgba(232,228,220,0.08);
+  pointer-events: none;
+}
+
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+.progress-track {
+  flex: 1; height: 2px;
+  background: rgba(232,228,220,0.1);
+}
+.progress-fill {
+  height: 100%;
+  background: #e8e4dc;
+  transition: width 0.8s cubic-bezier(0.16,1,0.3,1);
+}
+.progress-pct {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: rgba(232,228,220,0.45);
+  min-width: 3.5rem;
+  text-align: right;
+}
+
+/* 다운로드 버튼 */
+#download-btn {
+  display: block;
+  width: 100%;
+  margin-top: 1.5rem;
+  padding: 1.2rem;
+  background: transparent;
+  border: 1px solid rgba(232,228,220,0.3);
+  color: #e8e4dc;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+#download-btn:hover {
+  background: rgba(232,228,220,0.06);
+  border-color: rgba(232,228,220,0.6);
+}
+#download-btn:active {
+  background: rgba(232,228,220,0.12);
+}
+#download-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.notice {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: rgba(232,228,220,0.2);
+  text-align: center;
+  margin-top: 1.5rem;
+  line-height: 2;
+}
+.notice span { color: rgba(232,228,220,0.45); }
+
+#error-msg {
+  display: none;
+  background: rgba(200,50,50,0.15);
+  border: 1px solid rgba(200,50,50,0.3);
+  color: rgba(232,100,100,0.9);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  padding: 0.75rem 1rem;
+  margin-top: 1rem;
+}
+
+@keyframes flash {
+  0%   { opacity: 1; }
+  50%  { opacity: 0.3; }
+  100% { opacity: 1; }
+}
+.flash { animation: flash 0.4s ease; }
+
+@keyframes pulse {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(0.98); }
+  100% { transform: scale(1); }
+}
+.pulse { animation: pulse 0.3s ease; }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <header>
+    <div></div>
+    <div class="download-badge">
+      <div class="num" id="download-num">—</div>
+      <div class="lbl">총 다운로드</div>
+    </div>
+  </header>
+
+  <main>
+    <div id="canvas-wrap">
+      <canvas id="c"></canvas>
+      <div class="deg-overlay" id="deg-label">열화율 0%</div>
+      <div id="stage-label">원본</div>
+    </div>
+
+    <div class="progress-row">
+      <div class="progress-track">
+        <div class="progress-fill" id="prog-fill" style="width:0%"></div>
+      </div>
+      <div class="progress-pct" id="prog-pct">0 / 0</div>
+    </div>
+
+    <button id="download-btn" disabled>— 이미지 다운로드 —</button>
+
+    <div id="error-msg"></div>
+
+    <div class="notice">
+      이미지는 다운로드될수록 천천히 열화됩니다.<br>
+      당신이 저장한 이미지는 이 순간의 기록입니다.<br>
+      <span>현재 다운로드 횟수: <span id="notice-downloads">—</span> / <span id="notice-max">—</span></span>
+    </div>
+  </main>
+</div>
+
+<script>
+
+// =============================================
+// 🔧 설정 — 이 부분만 수정하세요
+// =============================================
+
+var MAX_DOWNLOADS = 150;  // 열화 완료 기준 다운로드 횟수
+
+var IMAGE_URL = "https://raw.githubusercontent.com/Gnao2/aritd/main/image.jpg";  // 이미지 URL
+
+var FIREBASE_API_KEY        = "AIzaSyDs8RtYNZKPPX4e423JcblqR6HJmJOyEwY";
+var FIREBASE_AUTH_DOMAIN    = "pic-im-baa48.firebaseapp.com";
+var FIREBASE_DATABASE_URL   = "https://pic-im-baa48-default-rtdb.firebaseio.com";
+var FIREBASE_PROJECT_ID     = "pic-im-baa48";
+var FIREBASE_STORAGE_BUCKET = "pic-im-baa48.appspot.com";
+var FIREBASE_MESSAGING_ID   = "1051492948726";
+var FIREBASE_APP_ID         = "1:1051492948726:web:1234567890abcdef";
+
+// =============================================
+
+
+var canvas = document.getElementById('c');
+var ctx = canvas.getContext('2d');
+var originalImageData = null;
+var currentDownloads = 0;
+
+function loadImage(src) {
+  var img = new Image();
+  img.crossOrigin = "anonymous";
+  img.onload = function() {
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    ctx.drawImage(img, 0, 0);
+    originalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    document.getElementById('download-btn').disabled = false;
+    renderDegradation(currentDownloads);
+  };
+  img.src = src;
+}
+
+function getStage(t) {
+  if (t < 0.05) return '원본';
+  if (t < 0.2)  return '노이즈';
+  if (t < 0.4)  return '픽셀화';
+  if (t < 0.6)  return '글리치';
+  if (t < 0.8)  return '탈색';
+  if (t < 0.99) return '소멸 직전';
+  return '파괴됨';
+}
+
+function renderDegradation(downloads) {
+  if (!originalImageData) return;
+  var t = Math.min(downloads / MAX_DOWNLOADS, 1);
+  var w = canvas.width;
+  var h = canvas.height;
+  var src = new Uint8ClampedArray(originalImageData.data);
+  var out = ctx.createImageData(w, h);
+  var d = out.data;
+  var i, n, gray, fade, burn;
+  for (i = 0; i < src.length; i++) d[i] = src[i];
+
+  if (t > 0.05) {
+    var amt = Math.min((t - 0.05) / 0.15, 1) * 60;
+    for (i = 0; i < d.length; i += 4) {
+      n = (Math.random() - 0.5) * amt;
+      d[i]   = Math.min(255, Math.max(0, d[i]   + n));
+      d[i+1] = Math.min(255, Math.max(0, d[i+1] + n));
+      d[i+2] = Math.min(255, Math.max(0, d[i+2] + n));
+    }
+  }
+
+  if (t > 0.2) {
+    var blockSize = Math.floor(2 + ((t - 0.2) / 0.2) * 32);
+    var by, bx, dy, dx, si, ni, br, bg, bb;
+    for (by = 0; by < h; by += blockSize) {
+      for (bx = 0; bx < w; bx += blockSize) {
+        si = (by * w + bx) * 4;
+        br = d[si]; bg = d[si+1]; bb = d[si+2];
+        for (dy = 0; dy < blockSize && by+dy < h; dy++) {
+          for (dx = 0; dx < blockSize && bx+dx < w; dx++) {
+            ni = ((by+dy)*w + (bx+dx)) * 4;
+            d[ni]=br; d[ni+1]=bg; d[ni+2]=bb;
+          }
+        }
+      }
+    }
+  }
+
+  if (t > 0.4) {
+    var lines = Math.floor(((t - 0.4) / 0.2) * 30);
+    var gy, gx, shift, sx, sii, di;
+    for (var g = 0; g < lines; g++) {
+      gy = Math.floor(Math.random() * h);
+      shift = Math.floor((Math.random() - 0.5) * ((t-0.4)/0.2) * 160);
+      for (gx = 0; gx < w; gx++) {
+        sx = (gx + shift + w) % w;
+        sii = (gy * w + sx) * 4;
+        di  = (gy * w + gx) * 4;
+        d[di]=d[sii]; d[di+1]=d[sii+1]; d[di+2]=d[sii+2];
+      }
+    }
+  }
+
+  if (t > 0.6) {
+    fade = Math.min((t - 0.6) / 0.2, 1);
+    for (i = 0; i < d.length; i += 4) {
+      gray = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+      d[i]   = d[i]   * (1-fade) + gray * fade;
+      d[i+1] = d[i+1] * (1-fade) + gray * fade;
+      d[i+2] = d[i+2] * (1-fade) + gray * fade;
+    }
+  }
+
+  if (t > 0.8) {
+    burn = Math.min((t - 0.8) / 0.2, 1);
+    for (i = 0; i < d.length; i += 4) {
+      d[i]   = d[i]   * (1 - burn);
+      d[i+1] = d[i+1] * (1 - burn);
+      d[i+2] = d[i+2] * (1 - burn);
+    }
+  }
+
+  ctx.putImageData(out, 0, 0);
+
+  var pct = Math.round(t * 100);
+  document.getElementById('deg-label').textContent = '열화율 ' + pct + '%';
+  document.getElementById('stage-label').textContent = getStage(t);
+  document.getElementById('prog-fill').style.width = pct + '%';
+  document.getElementById('prog-pct').textContent = downloads + ' / ' + MAX_DOWNLOADS;
+  document.getElementById('notice-downloads').textContent = downloads;
+  document.getElementById('notice-max').textContent = MAX_DOWNLOADS;
+}
+
+function downloadCurrentImage() {
+  var link = document.createElement('a');
+  link.download = 'image_' + currentDownloads + '.jpg';
+  link.href = canvas.toDataURL('image/jpeg', 0.92);
+  link.click();
+}
+
+function initFirebase() {
+  try {
+    firebase.initializeApp({
+      apiKey:            FIREBASE_API_KEY,
+      authDomain:        FIREBASE_AUTH_DOMAIN,
+      databaseURL:       FIREBASE_DATABASE_URL,
+      projectId:         FIREBASE_PROJECT_ID,
+      storageBucket:     FIREBASE_STORAGE_BUCKET,
+      messagingSenderId: FIREBASE_MESSAGING_ID,
+      appId:             FIREBASE_APP_ID
+    });
+    var db  = firebase.database();
+    var ref = db.ref('downloads');
+
+    // 실시간 동기화
+    ref.on('value', function(snap) {
+      var v = snap.val() || 0;
+      currentDownloads = v;
+      document.getElementById('download-num').textContent = v;
+      document.getElementById('download-num').classList.add('flash');
+      setTimeout(function() {
+        document.getElementById('download-num').classList.remove('flash');
+      }, 500);
+      renderDegradation(v);
+    });
+
+    // 다운로드 버튼
+    document.getElementById('download-btn').addEventListener('click', function() {
+      var btn = this;
+      btn.disabled = true;
+      btn.textContent = '— 다운로드 중... —';
+
+      // 먼저 다운로드
+      downloadCurrentImage();
+
+      // 카운터 +1
+      ref.transaction(function(current) { return (current || 0) + 1; });
+
+      setTimeout(function() {
+        btn.disabled = false;
+        btn.textContent = '— 이미지 다운로드 —';
+      }, 1500);
+    });
+
+  } catch(e) {
+    var el = document.getElementById('error-msg');
+    el.style.display = 'block';
+    el.textContent = 'Firebase 오류: ' + e.message;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  loadImage(IMAGE_URL);
+  initFirebase();
+});
+</script>
+</body>
+</html>
